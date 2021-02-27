@@ -38,7 +38,7 @@ func main() {
 	max := flag.Int("max", 10, "maximum number of activations for this license")
 	flag.Parse()
 
-	rows, err := dbGlobal.Query(issue, *max)
+	rows, err := dbGlobal.Query(issueQuery, *max)
 	if err != nil {
 		log.Panic(err)
 	}
