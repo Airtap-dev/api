@@ -13,6 +13,11 @@ make build
 ./bin/server
 ```
 
+To issue a new license, run:
+```
+heroku run issuer -- -max=<number of activations>
+```
+
 ## Deploying
 **The app deploys automatically on each merge to the main branch.**
 

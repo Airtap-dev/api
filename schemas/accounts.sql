@@ -7,7 +7,7 @@ CREATE SEQUENCE IF NOT EXISTS public.user_id_seq
     NO MAXVALUE
     CACHE 1;
 
-CREATE TABLE public.accounts (
+CREATE TABLE IF NOT EXISTS public.accounts (
     id bigint NOT NULL,
     license uuid NOT NULL,
     code character(12) NOT NULL,
