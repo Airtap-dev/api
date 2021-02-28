@@ -1,10 +1,11 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"io/ioutil"
 	"log"
-	"math/rand"
+	"math/big"
 	"net/http"
 	"os"
 	"strings"
@@ -46,7 +47,7 @@ func init() {
 		log.Panic(err)
 	}
 
-	// Make sure the table are in place.
+	// Make sure the tables are in place.
 	if dat, err := ioutil.ReadFile("schemas/license_keys.sql"); err != nil {
 		log.Panic(err)
 	} else if _, err := dbGlobal.Exec(string(dat)); err != nil {
@@ -101,19 +102,46 @@ func create(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func randString(n int) string {
-	const charPool = "1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = charPool[rand.Intn(len(charPool))]
+func randString(n int) (string, error) {
+	const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	ret := make([]byte, n)
+	for i := 0; i < n; i++ {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+		if err != nil {
+			return "", err
+		}
+		ret[i] = alphabet[num.Int64()]
 	}
-	return string(b)
+
+	return string(ret), nil
 }
 
 func createAccount(req createRequest, w http.ResponseWriter, r *http.Request) {
-	code, token := randString(12), randString(128)
-	row := dbGlobal.QueryRow(createAccountQuery, req.LicenseKey, code, token, req.FirstName, req.LastName)
+	code, err := randString(12)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(apiError{
+			Code:    codeInternalError,
+			Message: messageInternalError,
+		})
 
+		log.Print(err)
+		return
+	}
+
+	token, err := randString(128)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(apiError{
+			Code:    codeInternalError,
+			Message: messageInternalError,
+		})
+
+		log.Print(err)
+		return
+	}
+	
+	row := dbGlobal.QueryRow(createAccountQuery, req.LicenseKey, code, token, req.FirstName, req.LastName)
 	var id int
 	if err := row.Scan(&id); err == sql.ErrNoRows {
 		w.WriteHeader(http.StatusBadRequest)
