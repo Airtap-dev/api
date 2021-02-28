@@ -8,9 +8,11 @@ import (
 	"math/big"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"database/sql"
+	"server/relay"
 
 	_ "github.com/lib/pq"
 )
@@ -59,22 +61,24 @@ func init() {
 	} else if _, err := dbGlobal.Exec(string(dat)); err != nil {
 		log.Panic(err)
 	}
+
+	pool.connections = make(map[int]*relay.Conn)
 }
 
 type apiError struct {
-	Code    int    `json:"error_code"`
+	Code    int    `json:"errorCode"`
 	Message string `json:"message"`
 }
 
 type createRequest struct {
-	LicenseKey string `json:"license_key"`
-	FirstName  string `json:"first_name"`
-	LastName   string `json:"last_name,omitempty"`
+	LicenseKey string `json:"licenseKey"`
+	FirstName  string `json:"firstName"`
+	LastName   string `json:"lastName,omitempty"`
 }
 
 type createResponse struct {
-	ShareableLink string `json:"shareable_link"`
-	ID            int    `json:"id"`
+	ShareableLink string `json:"shareableLink"`
+	ID            int    `json:"accountId"`
 	Token         string `json:"token"`
 }
 
@@ -140,7 +144,7 @@ func createAccount(req createRequest, w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		return
 	}
-	
+
 	row := dbGlobal.QueryRow(createAccountQuery, req.LicenseKey, code, token, req.FirstName, req.LastName)
 	var id int
 	if err := row.Scan(&id); err == sql.ErrNoRows {
@@ -231,12 +235,12 @@ func checkLicense(license string, w http.ResponseWriter, r *http.Request) bool {
 }
 
 type discoverResponse struct {
-	ID        int    `json:"id"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name,omitempty"`
+	ID        int    `json:"accountId"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName,omitempty"`
 }
 
-func discover(w http.ResponseWriter, r *http.Request) {
+func discover(acc account, w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.NotFound(w, r)
 		return
@@ -273,7 +277,11 @@ func discover(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func auth(handler http.HandlerFunc) http.HandlerFunc {
+type account struct {
+	id int
+}
+
+func auth(handler func(account, http.ResponseWriter, *http.Request)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		id, token, ok := r.BasicAuth()
@@ -308,11 +316,14 @@ func auth(handler http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		handler(w, r)
+		i, _ := strconv.Atoi(id)
+		handler(account{i}, w, r)
 	}
 }
 
 func main() {
+	http.HandleFunc("/ws", auth(ws))
+	http.HandleFunc("/ws/", auth(ws))
 	http.HandleFunc("/account/create", create)
 	http.HandleFunc("/account/create/", create)
 	http.HandleFunc("/account/discover/", auth(discover))

@@ -1,3 +1,6 @@
+# github.com/gorilla/websocket v1.4.2
+## explicit
+github.com/gorilla/websocket
 # github.com/lib/pq v1.9.0
 ## explicit
 github.com/lib/pq
