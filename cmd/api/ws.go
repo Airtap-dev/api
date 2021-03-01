@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"server/relay"
+	"server/lib/relay"
 
 	"github.com/gorilla/websocket"
 )
@@ -38,6 +38,7 @@ func ws(acc account, w http.ResponseWriter, r *http.Request) {
 	pool.mu.Unlock()
 
 	defer func() {
+		// TODO: close timeout goroutines
 		log.Printf("closing connection with %v", acc.id)
 		pool.mu.Lock()
 		delete(pool.connections, acc.id)
@@ -49,6 +50,7 @@ func ws(acc account, w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(30 * time.Second)
 	done := make(chan bool)
 	defer func() {
+		ticker.Stop()
 		done <- true
 	}()
 

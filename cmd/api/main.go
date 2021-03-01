@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"database/sql"
-	"server/relay"
+	"server/lib/relay"
 
 	_ "github.com/lib/pq"
 )
@@ -120,6 +120,7 @@ func randString(n int) (string, error) {
 	return string(ret), nil
 }
 
+// TODO: handle empty firstname
 func createAccount(req createRequest, w http.ResponseWriter, r *http.Request) {
 	code, err := randString(12)
 	if err != nil {
@@ -168,7 +169,7 @@ func createAccount(req createRequest, w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(createResponse{
-		ShareableLink: "https://joinairtap.com/" + strings.ToLower(req.FirstName) + "/" + code,
+		ShareableLink: "https://joinairtap.com/with/" + strings.ToLower(req.FirstName) + "/" + code,
 		ID:            id,
 		Token:         token,
 	}); err != nil {
@@ -240,6 +241,7 @@ type discoverResponse struct {
 	LastName  string `json:"lastName,omitempty"`
 }
 
+// TODO: handle ErrNoRows
 func discover(acc account, w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.NotFound(w, r)

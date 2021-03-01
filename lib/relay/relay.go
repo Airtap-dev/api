@@ -242,7 +242,6 @@ func (c *Conn) RelayOffer(peer *Conn, offer interface{}) {
 	}
 
 	json, err := json.Marshal(msg)
-
 	if err != nil {
 		log.Print(err)
 		return
