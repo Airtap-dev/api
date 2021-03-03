@@ -120,8 +120,17 @@ func randString(n int) (string, error) {
 	return string(ret), nil
 }
 
-// TODO: handle empty firstname
 func createAccount(req createRequest, w http.ResponseWriter, r *http.Request) {
+	if req.FirstName == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(apiError{
+			Code:    codeInvalidBody,
+			Message: messageInvalidBody,
+		})
+
+		return
+	}
+
 	code, err := randString(12)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -188,7 +197,16 @@ func checkLicense(license string, w http.ResponseWriter, r *http.Request) bool {
 
 	var maxActivations int
 	var revoked bool
-	if err := row.Scan(&maxActivations, &revoked); err != nil {
+	if err := row.Scan(&maxActivations, &revoked); err == sql.ErrNoRows {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(apiError{
+			Code:    codeInvalidLicense,
+			Message: messageInvalidLicense,
+		})
+
+		log.Print(err)
+		return false
+	} else if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(apiError{
 			Code:    codeInternalError,
@@ -241,7 +259,6 @@ type discoverResponse struct {
 	LastName  string `json:"lastName,omitempty"`
 }
 
-// TODO: handle ErrNoRows
 func discover(acc account, w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		http.NotFound(w, r)
@@ -316,7 +333,16 @@ func auth(handler func(account, http.ResponseWriter, *http.Request)) http.Handle
 
 		row := dbGlobal.QueryRow(authenticateQuery, id, token)
 		var count int
-		if err := row.Scan(&count); err != nil {
+		if err := row.Scan(&count); err == sql.ErrNoRows {
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(apiError{
+				Code:    codeInvalidCredentials,
+				Message: messageInvalidCredentials,
+			})
+
+			log.Print(err)
+			return
+		} else if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(apiError{
 				Code:    codeInternalError,
