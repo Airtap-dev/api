@@ -151,8 +151,8 @@ func createAccount(req createRequest, w http.ResponseWriter, r *http.Request) {
 	if err := row.Scan(&id); err == sql.ErrNoRows {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(apiError{
-			Code:    codeInvalidCode,
-			Message: messageInvalidCode,
+			Code:    codeInternalError,
+			Message: messageInternalError,
 		})
 
 		log.Print(err)
@@ -248,12 +248,30 @@ func discover(acc account, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	code := r.URL.Query()["code"][0]
+	var code string
+	if codes := r.URL.Query()["code"]; len(codes) != 0 {
+		code = r.URL.Query()["code"][0]
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(apiError{
+			Code:    codeInvalidCode,
+			Message: messageInvalidCode,
+		})
+		return
+	}
+
 	row := dbGlobal.QueryRow(discoverAccountQuery, code)
 
 	var id int
 	var firstName, lastName string
-	if err := row.Scan(&id, &firstName, &lastName); err != nil {
+	if err := row.Scan(&id, &firstName, &lastName); err == sql.ErrNoRows {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(apiError{
+			Code:    codeInvalidCode,
+			Message: messageInvalidCode,
+		})
+		return
+	} else if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(apiError{
 			Code:    codeInternalError,
@@ -328,6 +346,8 @@ func main() {
 	http.HandleFunc("/ws/", auth(ws))
 	http.HandleFunc("/account/create", create)
 	http.HandleFunc("/account/create/", create)
+	http.HandleFunc("/session/turn", auth(turn))
+	http.HandleFunc("/session/turn/", auth(turn))
 	http.HandleFunc("/account/discover/", auth(discover))
 	http.HandleFunc("/account/discover", auth(discover))
 	log.Fatal(http.ListenAndServe(":"+os.Getenv("PORT"), nil))
