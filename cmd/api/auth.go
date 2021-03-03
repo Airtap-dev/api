@@ -14,6 +14,7 @@ import (
 )
 
 type turnCredentials struct {
+	ID       int    `json:"serverId"`
 	URL      string `json:"url"`
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -26,10 +27,12 @@ type turnResponse struct {
 var turnKeys = []struct {
 	url string
 	env string
+	id  int
 }{
 	{
 		url: "turns:turn.airtap.dev:5349",
 		env: "TURN_GERMANY_KEY",
+		id:  1,
 	},
 }
 
@@ -71,6 +74,7 @@ func turn(acc account, w http.ResponseWriter, r *http.Request) {
 			URL:      key.url,
 			Username: username,
 			Password: pwd,
+			ID:       key.id,
 		}
 	}
 

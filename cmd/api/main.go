@@ -37,6 +37,8 @@ const (
 var dbGlobal *sql.DB
 
 func init() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
 	// Connect.
 	if db, err := sql.Open("postgres", os.Getenv("DATABASE_URL")); err != nil {
 		log.Panic(err)
@@ -88,7 +90,6 @@ func create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	decoder := json.NewDecoder(r.Body)
 	var req createRequest
 	if err := decoder.Decode(&req); err != nil {
@@ -320,7 +321,6 @@ type account struct {
 
 func auth(handler func(account, http.ResponseWriter, *http.Request)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
 		id, token, ok := r.BasicAuth()
 		if !ok {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -367,14 +367,21 @@ func auth(handler func(account, http.ResponseWriter, *http.Request)) http.Handle
 	}
 }
 
+func preHandle(handler func(http.ResponseWriter, *http.Request)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		handler(w, r)
+	}
+}
+
 func main() {
-	http.HandleFunc("/ws", auth(ws))
-	http.HandleFunc("/ws/", auth(ws))
-	http.HandleFunc("/account/create", create)
-	http.HandleFunc("/account/create/", create)
-	http.HandleFunc("/session/turn", auth(turn))
-	http.HandleFunc("/session/turn/", auth(turn))
-	http.HandleFunc("/account/discover/", auth(discover))
-	http.HandleFunc("/account/discover", auth(discover))
+	http.HandleFunc("/ws", preHandle(auth(ws)))
+	http.HandleFunc("/ws/", preHandle(auth(ws)))
+	http.HandleFunc("/account/create", preHandle(create))
+	http.HandleFunc("/account/create/", preHandle(create))
+	http.HandleFunc("/rtc/servers", preHandle(auth(turn)))
+	http.HandleFunc("/rtc/servers/", preHandle(auth(turn)))
+	http.HandleFunc("/account/discover/", preHandle(auth(discover)))
+	http.HandleFunc("/account/discover", preHandle(auth(discover)))
 	log.Fatal(http.ListenAndServe(":"+os.Getenv("PORT"), nil))
 }
