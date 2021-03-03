@@ -105,7 +105,9 @@ type Conn struct {
 }
 
 func (c *Conn) Read() ([]byte, int) {
+	log.Println("obtaining lock")
 	c.rLock.Lock()
+	log.Println("lock obtained")
 	defer c.rLock.Unlock()
 
 	messageType, p, err := c.conn.ReadMessage()
