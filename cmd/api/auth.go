@@ -28,7 +28,7 @@ var turnKeys = []struct {
 	env string
 }{
 	{
-		url: "turn:turn.airtap.dev:3478",
+		url: "turns:turn.airtap.dev:5349",
 		env: "TURN_GERMANY_KEY",
 	},
 }
