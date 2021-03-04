@@ -6,6 +6,13 @@ It compiles to multiple binaries and runs on Heroku.
 The `issuer` executable issues new license codes on demand (defaults to 10 accounts per key). The `api` executable serves the HTTP API and the SDP relay over WebSockets.
 
 ## Running
+Make sure you have a local Postgres database running. To make sure the migrations work, bring them up, then down, then up again.
+```
+migrate -database "postgresql://localhost?sslmode=disable" -path migrations/ up
+migrate -database "postgresql://localhost?sslmode=disable" -path migrations/ down
+migrate -database "postgresql://localhost?sslmode=disable" -path migrations/ up
+```
+
 Once you have your local Heroku environment set up, make sure you are working with the **staging** environment.
 ```
 git pull
@@ -14,17 +21,7 @@ heroku repo:reset -a airtap-api-staging
 heroku git:remote -a staging
 ```
 
-Then you can build:
-```
-make build
-./bin/issuer
-./bin/api
-```
-
-And you can run (Go is a compiled language, make sure to rebuild before each run):
-`heroku local` (runs the issuer) or `heroku local web` (runs the web server).
-
-When running locally with `heroku local`, you can set environment variables in the `.env` file. It's already in `.gitignore`.
+Then you can build: `make build`. And now you are ready to run! (Go is a compiled language, make sure to rebuild before each run): `heroku local` (runs the issuer) or `heroku local web` (runs the web server). When running locally with `heroku local`, you can set environment variables in the `.env` file. It's already in `.gitignore`.
 
 To issue a new license on staging, run:
 ```

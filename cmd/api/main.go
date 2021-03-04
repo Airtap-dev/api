@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"database/sql"
 	"server/lib/relay"
@@ -40,6 +39,10 @@ const (
 var dbGlobal *sql.DB
 
 func init() {
+	if os.Getenv("TEST") != "" {
+		return
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	// Connect.
@@ -120,32 +123,8 @@ func randString(n int) (string, error) {
 	return string(ret), nil
 }
 
-func checkFirstName(s string) bool {
-	if s == "" {
-		return false
-	}
-
-	for _, r := range s {
-		if !unicode.IsLetter(r) {
-			return false
-		}
-	}
-
-	return true
-}
-
-func checkLastName(s string) bool {
-	for _, r := range s {
-		if !unicode.IsLetter(r) {
-			return false
-		}
-	}
-
-	return true
-}
-
 func createAccount(licenseID int, firstName, lastName string, w http.ResponseWriter, r *http.Request) {
-	if !checkFirstName(firstName) || !checkLastName(lastName) {
+	if firstName == "" || strings.Count(firstName, " ") == len(firstName) {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(apiError{
 			Code:    codeInvalidBody,
@@ -202,7 +181,7 @@ func createAccount(licenseID int, firstName, lastName string, w http.ResponseWri
 	}
 
 	if err := json.NewEncoder(w).Encode(createResponse{
-		ShareableLink: "https://joinairtap.com/with/" + strings.ToLower(firstName) + "/" + code,
+		ShareableLink: "https://joinairtap.com/with/" + code,
 		ID:            id,
 		Token:         token,
 	}); err != nil {

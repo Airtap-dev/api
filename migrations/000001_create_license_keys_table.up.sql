@@ -11,7 +11,9 @@ CREATE TABLE IF NOT EXISTS public.license_keys (
     id bigint NOT NULL UNIQUE,
     license uuid DEFAULT public.uuid_generate_v4() NOT NULL UNIQUE,
     max_activations smallint DEFAULT 10 NOT NULL,
-    revoked boolean DEFAULT false NOT NULL
+    revoked boolean DEFAULT false NOT NULL,
+
+    PRIMARY KEY (id)
 );
 
 ALTER SEQUENCE public.license_keys_seq OWNED BY public.license_keys.id;
