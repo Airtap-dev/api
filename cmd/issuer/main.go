@@ -2,12 +2,14 @@ package main
 
 import (
 	"flag"
-	"io/ioutil"
 	"log"
 	"os"
 
 	"database/sql"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/lib/pq"
 )
 
@@ -26,11 +28,13 @@ func init() {
 		log.Panic(err)
 	}
 
-	// Make sure the table is in place.
-	if dat, err := ioutil.ReadFile("schemas/license_keys.sql"); err != nil {
+	// Make sure the tables are in place.
+	if driver, err := postgres.WithInstance(dbGlobal, &postgres.Config{}); err != nil {
 		log.Panic(err)
-	} else if _, err := dbGlobal.Exec(string(dat)); err != nil {
+	} else if m, err := migrate.NewWithDatabaseInstance("file://migrations", "postgres", driver); err != nil {
 		log.Panic(err)
+	} else {
+		m.Up()
 	}
 }
 

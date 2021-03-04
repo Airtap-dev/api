@@ -3,17 +3,20 @@ package main
 import (
 	"crypto/rand"
 	"encoding/json"
-	"io/ioutil"
 	"log"
 	"math/big"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"database/sql"
 	"server/lib/relay"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/lib/pq"
 )
 
@@ -22,7 +25,7 @@ const (
 	messageInternalError string = "Internal error."
 
 	codeInvalidBody    int    = 1
-	messageInvalidBody string = "Could not parse request body."
+	messageInvalidBody string = "Invalid body."
 
 	codeInvalidLicense    int    = 2
 	messageInvalidLicense string = "Invalid license."
@@ -52,16 +55,12 @@ func init() {
 	}
 
 	// Make sure the tables are in place.
-	if dat, err := ioutil.ReadFile("schemas/license_keys.sql"); err != nil {
+	if driver, err := postgres.WithInstance(dbGlobal, &postgres.Config{}); err != nil {
 		log.Panic(err)
-	} else if _, err := dbGlobal.Exec(string(dat)); err != nil {
+	} else if m, err := migrate.NewWithDatabaseInstance("file://migrations", "postgres", driver); err != nil {
 		log.Panic(err)
-	}
-
-	if dat, err := ioutil.ReadFile("schemas/accounts.sql"); err != nil {
-		log.Panic(err)
-	} else if _, err := dbGlobal.Exec(string(dat)); err != nil {
-		log.Panic(err)
+	} else {
+		m.Up()
 	}
 
 	pool.connections = make(map[int]*relay.Conn)
@@ -102,8 +101,8 @@ func create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if checkLicense(req.LicenseKey, w, r) {
-		createAccount(req, w, r)
+	if ok, id := checkLicense(req.LicenseKey, w, r); ok {
+		createAccount(id, req.FirstName, req.LastName, w, r)
 	}
 }
 
@@ -121,8 +120,32 @@ func randString(n int) (string, error) {
 	return string(ret), nil
 }
 
-func createAccount(req createRequest, w http.ResponseWriter, r *http.Request) {
-	if req.FirstName == "" {
+func checkFirstName(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func checkLastName(s string) bool {
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func createAccount(licenseID int, firstName, lastName string, w http.ResponseWriter, r *http.Request) {
+	if !checkFirstName(firstName) || !checkLastName(lastName) {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(apiError{
 			Code:    codeInvalidBody,
@@ -156,7 +179,7 @@ func createAccount(req createRequest, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row := dbGlobal.QueryRow(createAccountQuery, req.LicenseKey, code, token, req.FirstName, req.LastName)
+	row := dbGlobal.QueryRow(createAccountQuery, licenseID, code, token, firstName, lastName)
 	var id int
 	if err := row.Scan(&id); err == sql.ErrNoRows {
 		w.WriteHeader(http.StatusBadRequest)
@@ -179,7 +202,7 @@ func createAccount(req createRequest, w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewEncoder(w).Encode(createResponse{
-		ShareableLink: "https://joinairtap.com/with/" + strings.ToLower(req.FirstName) + "/" + code,
+		ShareableLink: "https://joinairtap.com/with/" + strings.ToLower(firstName) + "/" + code,
 		ID:            id,
 		Token:         token,
 	}); err != nil {
@@ -193,12 +216,12 @@ func createAccount(req createRequest, w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func checkLicense(license string, w http.ResponseWriter, r *http.Request) bool {
+func checkLicense(license string, w http.ResponseWriter, r *http.Request) (bool, int) {
 	row := dbGlobal.QueryRow(findLicenseQuery, license)
 
-	var maxActivations int
+	var id, maxActivations int
 	var revoked bool
-	if err := row.Scan(&maxActivations, &revoked); err == sql.ErrNoRows {
+	if err := row.Scan(&id, &maxActivations, &revoked); err == sql.ErrNoRows {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(apiError{
 			Code:    codeInvalidLicense,
@@ -206,7 +229,7 @@ func checkLicense(license string, w http.ResponseWriter, r *http.Request) bool {
 		})
 
 		log.Print(err)
-		return false
+		return false, 0
 	} else if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(apiError{
@@ -215,7 +238,7 @@ func checkLicense(license string, w http.ResponseWriter, r *http.Request) bool {
 		})
 
 		log.Print(err)
-		return false
+		return false, 0
 	}
 
 	if revoked {
@@ -225,10 +248,10 @@ func checkLicense(license string, w http.ResponseWriter, r *http.Request) bool {
 			Message: messageInvalidLicense,
 		})
 
-		return false
+		return false, 0
 	}
 
-	row = dbGlobal.QueryRow(findLicenseUsers, license)
+	row = dbGlobal.QueryRow(findLicenseUsers, id)
 	var currentActivations int
 	if err := row.Scan(&currentActivations); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -238,7 +261,7 @@ func checkLicense(license string, w http.ResponseWriter, r *http.Request) bool {
 		})
 
 		log.Print(err)
-		return false
+		return false, 0
 	}
 
 	if currentActivations >= maxActivations {
@@ -248,10 +271,10 @@ func checkLicense(license string, w http.ResponseWriter, r *http.Request) bool {
 			Message: messageInvalidLicense,
 		})
 
-		return false
+		return false, 0
 	}
 
-	return true
+	return true, id
 }
 
 type discoverResponse struct {
