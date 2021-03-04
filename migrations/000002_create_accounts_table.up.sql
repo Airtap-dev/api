@@ -1,5 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
-
 CREATE SEQUENCE IF NOT EXISTS public.user_id_seq
     START WITH 1
     INCREMENT BY 1
@@ -9,7 +7,7 @@ CREATE SEQUENCE IF NOT EXISTS public.user_id_seq
 
 CREATE TABLE IF NOT EXISTS public.accounts (
     id bigint NOT NULL,
-    license uuid NOT NULL,
+    license_id bigint NOT NULL,
     code character(12) NOT NULL UNIQUE,
     token character(128) NOT NULL,
     first_name character varying(30) NOT NULL,
@@ -17,8 +15,8 @@ CREATE TABLE IF NOT EXISTS public.accounts (
 
     PRIMARY KEY (id),
     CONSTRAINT fk_license
-        FOREIGN KEY(license)
-            REFERENCES license_keys(license)
+        FOREIGN KEY(license_id)
+            REFERENCES license_keys(id)
 );
 
 ALTER SEQUENCE public.user_id_seq OWNED BY public.accounts.id;
