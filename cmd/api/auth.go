@@ -3,8 +3,8 @@ package main
 import (
 	"crypto/hmac"
 	"crypto/sha1"
+	"database/sql"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,15 +13,31 @@ import (
 	"time"
 )
 
+func auth(f internalHandler) internalHandler {
+	return func(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
+		id, token, ok := r.BasicAuth()
+		if !ok {
+			return nil, errInvalidCredentials
+		}
+
+		var firstName, lastName, code string
+		row := dbGlobal.QueryRow(authenticateQuery, id, token)
+		if err := row.Scan(&firstName, &lastName, &code); err == sql.ErrNoRows {
+			return nil, errInvalidCredentials
+		} else if err != nil {
+			log.Print(err)
+			return nil, errInternal
+		}
+
+		i, _ := strconv.Atoi(id)
+		return f(account{id: i, firstName: firstName, lastName: lastName, code: code}, w, r)
+	}
+}
+
 type turnCredentials struct {
-	ID       int    `json:"serverId"`
 	URL      string `json:"url"`
 	Username string `json:"username"`
 	Password string `json:"password"`
-}
-
-type turnResponse struct {
-	Servers []turnCredentials `json:"servers"`
 }
 
 var turnKeys = []struct {
@@ -29,10 +45,14 @@ var turnKeys = []struct {
 	env string
 	id  int
 }{
+	// TODO: fix
+	// {
+	// url: "turns:turn.airtap.dev:5349",
+	// env: "TURN_GERMANY_KEY",
+	// },
 	{
-		url: "turns:turn.airtap.dev:5349",
-		env: "TURN_GERMANY_KEY",
-		id:  1,
+		url: "stun:stun.l.google.com:19302",
+		env: "",
 	},
 }
 
@@ -63,56 +83,53 @@ func createPassword(username, key string) (string, error) {
 	return base64.StdEncoding.EncodeToString(hasher.Sum(nil)), nil
 }
 
-func turn(acc account, w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.NotFound(w, r)
-		return
+type startResponse struct {
+	ID              int               `json:"accountId"`
+	FirstName       string            `json:"firstName"`
+	LastName        string            `json:"lastName"`
+	Code            string            `json:"code"`
+	TurnCredentials []turnCredentials `json:"turnCredentials"`
+}
+
+func start(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
+	creds, err := turn()
+	if err != nil {
+		return nil, err
 	}
 
-	servers := make([]turnCredentials, len(turnKeys))
+	return startResponse{
+		ID:              acc.id,
+		FirstName:       acc.firstName,
+		LastName:        acc.lastName,
+		Code:            acc.code,
+		TurnCredentials: creds,
+	}, nil
+}
+
+func turn() ([]turnCredentials, error) {
+	creds := make([]turnCredentials, len(turnKeys))
 	for i, key := range turnKeys {
 		var username, password string
 		var err error
 
 		if username, err = createUsername(); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(apiError{
-				Code:    codeInternalError,
-				Message: messageInternalError,
-			})
-
 			log.Print(err)
-			return
+			return nil, errInternal
 		}
 
 		if password, err = createPassword(username, os.Getenv(key.env)); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(apiError{
-				Code:    codeInternalError,
-				Message: messageInternalError,
-			})
-
 			log.Print(err)
-			return
+			return nil, errInternal
 		}
 
-		servers[i] = turnCredentials{
+		username = "" // TODO: fix
+		password = "" // TODO: fix
+		creds[i] = turnCredentials{
 			URL:      key.url,
 			Username: username,
 			Password: password,
-			ID:       key.id,
 		}
 	}
 
-	if err := json.NewEncoder(w).Encode(turnResponse{
-		Servers: servers,
-	}); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(apiError{
-			Code:    codeInternalError,
-			Message: messageInternalError,
-		})
-
-		log.Print(err)
-	}
+	return creds, nil
 }

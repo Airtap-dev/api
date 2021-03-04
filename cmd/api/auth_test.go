@@ -6,13 +6,13 @@ import (
 	"testing"
 )
 
-func testKeys(t *testing.T) {
+func TestKeys(t *testing.T) {
 	if len(turnKeys) == 0 {
 		t.Fail()
 	}
 }
 
-func testCreateUsername(t *testing.T) {
+func TestCreateUsername(t *testing.T) {
 	if username, err := createUsername(); err != nil {
 		t.Fail()
 	} else if !strings.Contains(username, ":") {
@@ -20,7 +20,7 @@ func testCreateUsername(t *testing.T) {
 	}
 }
 
-func testCreatePassword(t *testing.T) {
+func TestCreatePassword(t *testing.T) {
 	if username, err := createUsername(); err != nil || len(username) < 10 || !strings.Contains(username, ":") {
 		t.Fail()
 	} else if password, err := createPassword(username, os.Getenv(turnKeys[0].env)); err != nil || len(password) < 10 {
