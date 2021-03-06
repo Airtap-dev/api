@@ -1,2 +1,2 @@
-issuer: issuer
+issuer: bin/issuer
 web: bin/api

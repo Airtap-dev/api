@@ -104,10 +104,22 @@ type Conn struct {
 	expectingAnswersFrom map[int]bool
 }
 
-func (c *Conn) Read() ([]byte, int) {
-	log.Println("obtaining lock")
+func (c *Conn) Close() {
+	c.mu.Lock()
+	for _, timer := range c.unackedNonces {
+		timer.Stop()
+	}
+	c.mu.Unlock()
+
 	c.rLock.Lock()
-	log.Println("lock obtained")
+	c.wLock.Lock()
+	c.conn.Close()
+	c.rLock.Unlock()
+	c.wLock.Unlock()
+}
+
+func (c *Conn) Read() ([]byte, int) {
+	c.rLock.Lock()
 	defer c.rLock.Unlock()
 
 	messageType, p, err := c.conn.ReadMessage()
@@ -115,7 +127,6 @@ func (c *Conn) Read() ([]byte, int) {
 		log.Print(err)
 		return []byte{}, -1
 	} else if messageType != websocket.TextMessage {
-		log.Print("Received a non-text message")
 		return []byte{}, 0
 	}
 
@@ -165,7 +176,6 @@ func (c *Conn) IsExpectingAnswerFrom(peerID int) bool {
 }
 
 func (c *Conn) RelayAnswer(peer *Conn, answer interface{}) {
-	log.Println("relaying answer")
 	msg := outgoingAnswerMessage{
 		Type:  ANSWER,
 		Nonce: peer.lastOutgoingNonce + 1,
@@ -200,7 +210,6 @@ func (c *Conn) RelayAnswer(peer *Conn, answer interface{}) {
 }
 
 func (c *Conn) RelayCandidate(peer *Conn, candidate interface{}) {
-	log.Println("relaying candidate")
 	msg := outgoingCandidateMessage{
 		Type:  CANDIDATE,
 		Nonce: peer.lastOutgoingNonce + 1,
@@ -233,7 +242,6 @@ func (c *Conn) RelayCandidate(peer *Conn, candidate interface{}) {
 }
 
 func (c *Conn) RelayOffer(peer *Conn, offer interface{}) {
-	log.Printf("relaying offer")
 	msg := outgoingOfferMessage{
 		Type:  OFFER,
 		Nonce: peer.lastOutgoingNonce + 1,
@@ -276,7 +284,6 @@ func (c *Conn) Ping() {
 		return
 	}
 	c.wLock.Unlock()
-	log.Println("pinged")
 }
 
 func (c *Conn) SendAck(nonce int) {
@@ -296,5 +303,4 @@ func (c *Conn) SendAck(nonce int) {
 		log.Print(err)
 		return
 	}
-	log.Println("sent ack")
 }
