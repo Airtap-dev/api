@@ -5,6 +5,9 @@ It compiles to multiple binaries and runs on Heroku.
 
 The `issuer` executable issues new license codes on demand (defaults to 10 accounts per key). The `api` executable serves the HTTP API and the SDP relay over WebSockets.
 
+## Testing
+`DATABASE_URL=postgresql://localhost?sslmode=disable make test`
+
 ## Running
 Make sure you have a local Postgres database running. To make sure the migrations work, bring them up, then down, then up again.
 ```

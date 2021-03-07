@@ -71,8 +71,10 @@ func testAccountStart(t *testing.T, f internalHandler, req *http.Request, firstN
 
 		if len(r.TurnCredentials) == 0 {
 			t.Error("empty turn credentials returned")
-		} else if r.TurnCredentials[0].URL == "" /*|| r.TurnCredentials[0].Username == "" || r.TurnCredentials[0].Password == "" TODO: fix*/ {
+		} else if r.TurnCredentials[0].URL == "" || r.TurnCredentials[0].Username == "" || r.TurnCredentials[0].Password == "" {
 			t.Errorf("bad turn credentials returned: %v %v %v", r.TurnCredentials[0].URL, r.TurnCredentials[0].Username, r.TurnCredentials[0].Password)
+		} else if !strings.Contains(r.TurnCredentials[0].URL, "?transport=udp") {
+			t.Error("turn URL needs to specify UDP as the transport")
 		}
 	}
 }
