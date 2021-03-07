@@ -9,4 +9,5 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.14.1
 	github.com/gorilla/websocket v1.4.2
 	github.com/lib/pq v1.9.0
+	github.com/pion/turn/v2 v2.0.5
 )

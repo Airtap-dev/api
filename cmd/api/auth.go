@@ -1,16 +1,14 @@
 package main
 
 import (
-	"crypto/hmac"
-	"crypto/sha1"
 	"database/sql"
-	"encoding/base64"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
+
+	pTurn "github.com/pion/turn/v2"
 )
 
 func auth(f internalHandler) internalHandler {
@@ -45,42 +43,10 @@ var turnKeys = []struct {
 	env string
 	id  int
 }{
-	// TODO: fix
-	// {
-	// url: "turns:turn.airtap.dev:5349",
-	// env: "TURN_GERMANY_KEY",
-	// },
 	{
-		url: "stun:stun.l.google.com:19302",
-		env: "",
+		url: "turn:turn-de.airtap.dev:3478?transport=udp",
+		env: "TURN_GERMANY_KEY",
 	},
-}
-
-// The username is a colon-delimited random string and an expiration timestamp.
-// For more information, see the TURN REST API memo:
-// https://tools.ietf.org/html/draft-uberti-behave-turn-rest-00.
-func createUsername() (string, error) {
-	tempID, err := randString(5)
-	if err != nil {
-		return "", err
-	}
-
-	username := fmt.Sprintf("%v:%v", strconv.FormatInt(time.Now().Add(365*24*time.Hour).Unix(), 10), tempID)
-	return username, nil
-}
-
-// The password is base64(hmac(secret key, username)) where secret key is a key
-// stored between the backend and the TURN server. HMAC uses SHA-1 as required
-// by COTURN. For more information, see
-// https://tools.ietf.org/html/draft-uberti-behave-turn-rest-00 and
-// https://github.com/coturn/coturn/blob/060bf187879fd1a6386012f4c5a7494824ebe5c8/README.turnserver.
-func createPassword(username, key string) (string, error) {
-	hasher := hmac.New(sha1.New, []byte(os.Getenv(key)))
-	if _, err := hasher.Write([]byte(username)); err != nil {
-		return "", err
-	}
-
-	return base64.StdEncoding.EncodeToString(hasher.Sum(nil)), nil
 }
 
 type startResponse struct {
@@ -109,21 +75,13 @@ func start(acc account, w http.ResponseWriter, r *http.Request) (response, error
 func turn() ([]turnCredentials, error) {
 	creds := make([]turnCredentials, len(turnKeys))
 	for i, key := range turnKeys {
-		var username, password string
-		var err error
-
-		if username, err = createUsername(); err != nil {
+		// Create credentials valid for a year.
+		username, password, err := pTurn.GenerateLongTermCredentials(os.Getenv(key.env), 365*24*time.Hour)
+		if err != nil {
 			log.Print(err)
 			return nil, errInternal
 		}
 
-		if password, err = createPassword(username, os.Getenv(key.env)); err != nil {
-			log.Print(err)
-			return nil, errInternal
-		}
-
-		username = "" // TODO: fix
-		password = "" // TODO: fix
 		creds[i] = turnCredentials{
 			URL:      key.url,
 			Username: username,
