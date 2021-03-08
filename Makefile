@@ -4,5 +4,5 @@ build:
 	go build -o bin/api ./cmd/api
 
 test:
-	TEST=TEST TURN_DFW_KEY=secretkey go test ./...
+	TEST=TEST TURN_SFO_KEY=secretkey go test ./...
 	

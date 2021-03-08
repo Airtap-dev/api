@@ -14,6 +14,7 @@ import (
 )
 
 var pool struct {
+	// TODO: change to RW lock for efficiency.
 	mu          sync.Mutex
 	connections map[int]*relay.Conn
 }
