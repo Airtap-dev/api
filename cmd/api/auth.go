@@ -4,9 +4,10 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
+
+	"server/lib/geobalance"
 
 	pTurn "github.com/pion/turn/v2"
 )
@@ -38,17 +39,6 @@ type turnCredentials struct {
 	Password string `json:"password"`
 }
 
-var turnKeys = []struct {
-	url string
-	env string
-	id  int
-}{
-	{
-		url: "turn:turn-de.airtap.dev:3478?transport=udp",
-		env: "TURN_GERMANY_KEY",
-	},
-}
-
 type startResponse struct {
 	ID              int               `json:"accountId"`
 	FirstName       string            `json:"firstName"`
@@ -58,7 +48,12 @@ type startResponse struct {
 }
 
 func start(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
-	creds, err := turn()
+	var countryCode = r.Header.Get("CF-IPCountry")
+	if countryCode == "" {
+		countryCode = "unknown"
+	}
+
+	creds, err := turn(countryCode)
 	if err != nil {
 		return nil, err
 	}
@@ -72,22 +67,20 @@ func start(acc account, w http.ResponseWriter, r *http.Request) (response, error
 	}, nil
 }
 
-func turn() ([]turnCredentials, error) {
-	creds := make([]turnCredentials, len(turnKeys))
-	for i, key := range turnKeys {
-		// Create credentials valid for a year.
-		username, password, err := pTurn.GenerateLongTermCredentials(os.Getenv(key.env), 365*24*time.Hour)
-		if err != nil {
-			log.Print(err)
-			return nil, errInternal
-		}
-
-		creds[i] = turnCredentials{
-			URL:      key.url,
-			Username: username,
-			Password: password,
-		}
+func turn(countryCode string) ([]turnCredentials, error) {
+	url, key := geobalance.Balance(countryCode)
+	// Create credentials valid for a year.
+	username, password, err := pTurn.GenerateLongTermCredentials(key, 365*24*time.Hour)
+	if err != nil {
+		log.Print(err)
+		return nil, errInternal
 	}
 
-	return creds, nil
+	creds := turnCredentials{
+		URL:      url,
+		Username: username,
+		Password: password,
+	}
+
+	return []turnCredentials{creds}, nil
 }
