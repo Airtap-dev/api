@@ -69,10 +69,14 @@ func createAccount(licenseID int, firstName, lastName string) (response, error) 
 	}
 
 	return createResponse{
-		ShareableLink: "https://joinairtap.com/with/" + code,
+		ShareableLink: createShareableLink(code),
 		ID:            id,
 		Token:         token,
 	}, nil
+}
+
+func createShareableLink(code string) string {
+	return "https://joinairtap.com/with/" + code
 }
 
 type discoverResponse struct {

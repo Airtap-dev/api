@@ -65,8 +65,8 @@ func testAccountStart(t *testing.T, f internalHandler, req *http.Request, firstN
 	} else if r, ok := res.(startResponse); !ok {
 		t.Errorf("got unexpected start account return type: %v", r)
 	} else {
-		if r.ID != id || r.FirstName != firstName || r.LastName != lastName || r.Code == "" {
-			t.Errorf("bad account info returned: %v %v %v %v", r.ID, r.FirstName, r.LastName, r.Code)
+		if r.ID != id || r.FirstName != firstName || r.LastName != lastName || r.ShareableLink == "" {
+			t.Errorf("bad account info returned: %v %v %v %v", r.ID, r.FirstName, r.LastName, r.ShareableLink)
 		}
 
 		if len(r.TurnCredentials) == 0 {
