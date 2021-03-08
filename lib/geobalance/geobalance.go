@@ -5,32 +5,33 @@ import (
 	"log"
 	"os"
 	"strings"
-	"sync"
 )
-
-// Map country code to continent.
-var countryMappings = make(map[string]country)
-var countryMu sync.Mutex
 
 type turnInfo struct {
 	url string
 	key string
 }
 
-var continentsToURL = map[string]turnInfo{
-	// LUX
-	"AS": {url: "turn:turn-lux.airtap.dev:3478?transport=udp", key: os.Getenv("TURN_LUX_KEY")},
-	"EU": {url: "turn:turn-lux.airtap.dev:3478?transport=udp", key: os.Getenv("TURN_LUX_KEY")},
-	"AF": {url: "turn:turn-lux.airtap.dev:3478?transport=udp", key: os.Getenv("TURN_LUX_KEY")},
+// These maps do not need mutexes for access because they are read-only.
+var (
+	// Map country codes to continents.
+	countryMappings = make(map[string]country)
+	// Map continents to the respective TURN servers. Notice that the os.Getenv,
+	// which is a syscall, is only called once during initialization.
+	continentsToURL = map[string]turnInfo{
+		// FRA
+		"AS": {url: "turns:prod-turn-fra.airtap.dev:3478", key: os.Getenv("TURN_FRA_KEY")},
+		"EU": {url: "turns:prod-turn-fra.airtap.dev:3478", key: os.Getenv("TURN_FRA_KEY")},
+		"AF": {url: "turns:prod-turn-fra.airtap.dev:3478", key: os.Getenv("TURN_FRA_KEY")},
 
-	// DFW
-	"NA": {url: "turn:turn-dfw.airtap.dev:3478?transport=udp", key: os.Getenv("TURN_DFW_KEY")},
-	"SA": {url: "turn:turn-dfw.airtap.dev:3478?transport=udp", key: os.Getenv("TURN_DFW_KEY")},
-	"OC": {url: "turn:turn-dfw.airtap.dev:3478?transport=udp", key: os.Getenv("TURN_DFW_KEY")},
-}
-var continentsMu sync.Mutex
+		// SFO
+		"NA": {url: "turns:prod-turn-sfo.airtap.dev:3478", key: os.Getenv("TURN_SFO_KEY")},
+		"SA": {url: "turns:prod-turn-sfo.airtap.dev:3478", key: os.Getenv("TURN_SFO_KEY")},
+		"OC": {url: "turns:prod-turn-sfo.airtap.dev:3478", key: os.Getenv("TURN_SFO_KEY")},
+	}
+)
 
-var defaultInfo = turnInfo{url: "turn:turn-lux.airtap.dev:3478?transport=udp", key: os.Getenv("TURN_LUX_KEY")}
+var defaultInfo = turnInfo{url: "turns:prod-turn-fra.airtap.dev:3478", key: os.Getenv("TURN_FRA_KEY")}
 
 type country struct {
 	ContinentCode    string `json:"Continent_Code,omitempty"`
@@ -56,12 +57,9 @@ func init() {
 	}
 }
 
+// Balance takes a country code (2 letters) and returns the URL of the TURN
+// server and the key with which the password for the server should be signed.
 func Balance(countryCode string) (string, string) {
-	countryMu.Lock()
-	continentsMu.Lock()
-	defer countryMu.Unlock()
-	defer continentsMu.Unlock()
-
 	// Treat Russia as North America because Ilya is in Russia and wants to test
 	// the US servers. :)
 	if countryCode == "RU" {
