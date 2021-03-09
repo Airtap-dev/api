@@ -10,12 +10,17 @@ import (
 )
 
 const (
-	ACK       = "ack"
-	OFFER     = "offer"
-	ANSWER    = "answer"
+	// ACK is acknowledgement message type.
+	ACK = "ack"
+	// OFFER is offer message type.
+	OFFER = "offer"
+	// ANSWER is answer message type.
+	ANSWER = "answer"
+	// CANDIDATE is candidate message type.
 	CANDIDATE = "candidate"
 )
 
+// IncomingACKMessage represents a received acknowledgement message.
 type IncomingACKMessage struct {
 	Type  string `json:"type"`
 	Nonce int    `json:"nonce"`
@@ -26,17 +31,20 @@ type outgoingACKMessage struct {
 	Nonce int    `json:"nonce"`
 }
 
+// IncomingOfferPayload represents a received offer payload.
 type IncomingOfferPayload struct {
 	ToID  int         `json:"toAccountId"`
 	Offer interface{} `json:"offer"`
 }
 
+// IncomingOfferMessage represents a received offer message.
 type IncomingOfferMessage struct {
 	Type    string               `json:"type"`
 	Nonce   int                  `json:"nonce"`
-	Payload IncomingOfferPayload `json:"payload,omitempty"`
+	Payload IncomingOfferPayload `json:"payload"`
 }
 
+// OutgoingOfferPayload represents an outgoing offer payload.
 type OutgoingOfferPayload struct {
 	FromID int         `json:"fromAccountId"`
 	Offer  interface{} `json:"offer"`
@@ -45,20 +53,23 @@ type OutgoingOfferPayload struct {
 type outgoingOfferMessage struct {
 	Type    string               `json:"type"`
 	Nonce   int                  `json:"nonce"`
-	Payload OutgoingOfferPayload `json:"payload,omitempty"`
+	Payload OutgoingOfferPayload `json:"payload"`
 }
 
+// IncomingAnswerPaylaod represents a received answer payload.
 type IncomingAnswerPaylaod struct {
 	ToID   int         `json:"toAccountId"`
 	Answer interface{} `json:"answer"`
 }
 
+// IncomingAnswerMessage represents a received answer message.
 type IncomingAnswerMessage struct {
 	Type    string                `json:"type"`
 	Nonce   int                   `json:"nonce"`
-	Payload IncomingAnswerPaylaod `json:"payload,omitempty"`
+	Payload IncomingAnswerPaylaod `json:"payload"`
 }
 
+// OutgoingAnswerPayload represents an outgoing answer payload.
 type OutgoingAnswerPayload struct {
 	FromID int         `json:"fromAccountId"`
 	Answer interface{} `json:"answer"`
@@ -67,20 +78,23 @@ type OutgoingAnswerPayload struct {
 type outgoingAnswerMessage struct {
 	Type    string                `json:"type"`
 	Nonce   int                   `json:"nonce"`
-	Payload OutgoingAnswerPayload `json:"payload,omitempty"`
+	Payload OutgoingAnswerPayload `json:"payload"`
 }
 
+// IncomingCandidatePayload represents a received candidate payload.
 type IncomingCandidatePayload struct {
 	ToID      int         `json:"toAccountId"`
 	Candidate interface{} `json:"candidate"`
 }
 
+// IncomingCandidateMessage represents an outgoing candidate message.
 type IncomingCandidateMessage struct {
 	Type    string                   `json:"type"`
 	Nonce   int                      `json:"nonce"`
-	Payload IncomingCandidatePayload `json:"payload,omitempty"`
+	Payload IncomingCandidatePayload `json:"payload"`
 }
 
+// OutgoingCandidatePayload represents an outgoing candidate payload.
 type OutgoingCandidatePayload struct {
 	FromID    int         `json:"fromAccountId"`
 	Candidate interface{} `json:"candidate"`
@@ -89,13 +103,17 @@ type OutgoingCandidatePayload struct {
 type outgoingCandidateMessage struct {
 	Type    string                   `json:"type"`
 	Nonce   int                      `json:"nonce"`
-	Payload OutgoingCandidatePayload `json:"payload,omitempty"`
+	Payload OutgoingCandidatePayload `json:"payload"`
 }
 
+// Conn represents a relay connection.
 type Conn struct {
-	rLock                sync.Mutex
-	wLock                sync.Mutex
-	mu                   sync.Mutex
+	// Lock for the underlying websocket connection reader.
+	rLock sync.Mutex
+	// Lock for the underlying websocket connection writer.
+	wLock sync.Mutex
+	// Lock for the Conn struct itself.
+	rwMutex              sync.RWMutex
 	conn                 *websocket.Conn
 	id                   int
 	lastOutgoingNonce    int
@@ -104,20 +122,24 @@ type Conn struct {
 	expectingAnswersFrom map[int]bool
 }
 
+// Close closes the connection.
 func (c *Conn) Close() {
-	c.mu.Lock()
+	c.rwMutex.Lock()
 	for _, timer := range c.unackedNonces {
+		// Stop all acknowledgement timers.
 		timer.Stop()
 	}
-	c.mu.Unlock()
+	c.rwMutex.Unlock()
 
 	c.rLock.Lock()
+	defer c.rLock.Unlock()
 	c.wLock.Lock()
+	defer c.wLock.Unlock()
+
 	c.conn.Close()
-	c.rLock.Unlock()
-	c.wLock.Unlock()
 }
 
+// Read reads from the connection.
 func (c *Conn) Read() ([]byte, int) {
 	c.rLock.Lock()
 	defer c.rLock.Unlock()
@@ -133,6 +155,7 @@ func (c *Conn) Read() ([]byte, int) {
 	return p, len(p)
 }
 
+// NewConn creates a connection.
 func NewConn(id int, wsConn *websocket.Conn) *Conn {
 	return &Conn{
 		conn:                 wsConn,
@@ -144,37 +167,40 @@ func NewConn(id int, wsConn *websocket.Conn) *Conn {
 	}
 }
 
+// MarkAcked marks a message as ACKed.
 func (c *Conn) MarkAcked(nonce int) {
-	c.mu.Lock()
-	if unacked, ok := c.unackedNonces[nonce]; ok {
-		unacked.Stop()
+	c.rwMutex.Lock()
+	defer c.rwMutex.Unlock()
+	if timer, ok := c.unackedNonces[nonce]; ok {
+		timer.Stop()
 		delete(c.unackedNonces, nonce)
 	}
-	c.mu.Unlock()
 }
 
+// StoreOffer stores the fact that a connection has an offer pending for a peer.
 func (c *Conn) StoreOffer(peerID int, offer interface{}) {
-	c.mu.Lock()
+	c.rwMutex.Lock()
+	defer c.rwMutex.Unlock()
 	c.offersFor[peerID] = true
-	c.mu.Unlock()
 }
 
+// IsExpectingOfferFrom returns whether the connection is expecting an offer
+// from a particular peer.
 func (c *Conn) IsExpectingOfferFrom(peerID int) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if ok := c.offersFor[peerID]; ok {
-		return true
-	}
-
-	return false
+	c.rwMutex.RLock()
+	defer c.rwMutex.RUnlock()
+	return c.offersFor[peerID]
 }
 
+// IsExpectingAnswerFrom returns whether the connection is expecting an answer
+// from a particular peer.
 func (c *Conn) IsExpectingAnswerFrom(peerID int) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.rwMutex.RLock()
+	defer c.rwMutex.RUnlock()
 	return c.expectingAnswersFrom[peerID]
 }
 
+// RelayAnswer relays an answer to a peer connection.
 func (c *Conn) RelayAnswer(peer *Conn, answer interface{}) {
 	msg := outgoingAnswerMessage{
 		Type:  ANSWER,
@@ -186,7 +212,6 @@ func (c *Conn) RelayAnswer(peer *Conn, answer interface{}) {
 	}
 
 	json, err := json.Marshal(msg)
-
 	if err != nil {
 		log.Print(err)
 		return
@@ -200,15 +225,16 @@ func (c *Conn) RelayAnswer(peer *Conn, answer interface{}) {
 	}
 	peer.wLock.Unlock()
 
-	peer.mu.Lock()
+	peer.rwMutex.Lock()
+	defer peer.rwMutex.Unlock()
 	delete(peer.expectingAnswersFrom, c.id)
 	peer.lastOutgoingNonce++
 	peer.unackedNonces[peer.lastOutgoingNonce] = time.AfterFunc(1*time.Minute, func() {
 		log.Printf("Never received ACK to message %v from account %v", msg, peer.id)
 	})
-	peer.mu.Unlock()
 }
 
+// RelayCandidate relays a candidate to a peer connection.
 func (c *Conn) RelayCandidate(peer *Conn, candidate interface{}) {
 	msg := outgoingCandidateMessage{
 		Type:  CANDIDATE,
@@ -218,8 +244,8 @@ func (c *Conn) RelayCandidate(peer *Conn, candidate interface{}) {
 			Candidate: candidate,
 		},
 	}
-	json, err := json.Marshal(msg)
 
+	json, err := json.Marshal(msg)
 	if err != nil {
 		log.Print(err)
 		return
@@ -233,14 +259,15 @@ func (c *Conn) RelayCandidate(peer *Conn, candidate interface{}) {
 	}
 	peer.wLock.Unlock()
 
-	peer.mu.Lock()
+	peer.rwMutex.Lock()
+	defer peer.rwMutex.Unlock()
 	peer.lastOutgoingNonce++
 	peer.unackedNonces[peer.lastOutgoingNonce] = time.AfterFunc(1*time.Minute, func() {
 		log.Printf("Never received ACK to message %v from account %v", msg, peer.id)
 	})
-	peer.mu.Unlock()
 }
 
+// RelayOffer relays an offer to a peer connection.
 func (c *Conn) RelayOffer(peer *Conn, offer interface{}) {
 	msg := outgoingOfferMessage{
 		Type:  OFFER,
@@ -265,18 +292,19 @@ func (c *Conn) RelayOffer(peer *Conn, offer interface{}) {
 	}
 	peer.wLock.Unlock()
 
-	peer.mu.Lock()
+	peer.rwMutex.Lock()
 	peer.lastOutgoingNonce++
 	peer.unackedNonces[peer.lastOutgoingNonce] = time.AfterFunc(1*time.Minute, func() {
 		log.Printf("Never received ACK to message %v from account %v", msg, peer.id)
 	})
-	peer.mu.Unlock()
+	peer.rwMutex.Unlock()
 
-	c.mu.Lock()
+	c.rwMutex.Lock()
 	c.expectingAnswersFrom[peer.id] = true
-	c.mu.Unlock()
+	c.rwMutex.Unlock()
 }
 
+// Ping sends a ping down the underlying connection.
 func (c *Conn) Ping() {
 	c.wLock.Lock()
 	if err := c.conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
@@ -286,6 +314,7 @@ func (c *Conn) Ping() {
 	c.wLock.Unlock()
 }
 
+// SendAck send an acknowledgement message.
 func (c *Conn) SendAck(nonce int) {
 	json, err := json.Marshal(outgoingACKMessage{
 		Type:  ACK,

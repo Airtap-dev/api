@@ -69,10 +69,14 @@ func createAccount(licenseID int, firstName, lastName string) (response, error) 
 	}
 
 	return createResponse{
-		ShareableLink: "https://joinairtap.com/with/" + code,
+		ShareableLink: createShareableLink(code),
 		ID:            id,
 		Token:         token,
 	}, nil
+}
+
+func createShareableLink(code string) string {
+	return "https://joinairtap.com/with/" + code
 }
 
 type discoverResponse struct {
@@ -83,14 +87,12 @@ type discoverResponse struct {
 
 func discover(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
 	var code string
-	log.Println(r.URL)
 	if codes := r.URL.Query()["code"]; len(codes) != 0 {
 		code = r.URL.Query()["code"][0]
 	} else {
 		return nil, errInvalidCode
 	}
 
-	log.Println("here")
 	row := dbGlobal.QueryRow(discoverAccountQuery, code)
 
 	var id int

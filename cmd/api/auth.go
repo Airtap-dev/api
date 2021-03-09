@@ -43,7 +43,7 @@ type startResponse struct {
 	ID              int               `json:"accountId"`
 	FirstName       string            `json:"firstName"`
 	LastName        string            `json:"lastName"`
-	Code            string            `json:"code"`
+	ShareableLink   string            `json:"shareableLink"`
 	TurnCredentials []turnCredentials `json:"turnCredentials"`
 }
 
@@ -62,7 +62,7 @@ func start(acc account, w http.ResponseWriter, r *http.Request) (response, error
 		ID:              acc.id,
 		FirstName:       acc.firstName,
 		LastName:        acc.lastName,
-		Code:            acc.code,
+		ShareableLink:   createShareableLink(acc.code),
 		TurnCredentials: creds,
 	}, nil
 }

@@ -12,6 +12,16 @@ type turnInfo struct {
 	key string
 }
 
+const (
+	// FRA
+	fraURL = "turns:prod-turn-fra.airtap.dev:3478"
+	fraEnv = "TURN_FRA_KEY"
+
+	// SFO
+	sfoURL = "turns:prod-turn-sfo.airtap.dev:3478"
+	sfoEnv = "TURN_SFO_KEY"
+)
+
 // These maps do not need mutexes for access because they are read-only.
 var (
 	// Map country codes to continents.
@@ -20,18 +30,19 @@ var (
 	// which is a syscall, is only called once during initialization.
 	continentsToURL = map[string]turnInfo{
 		// FRA
-		"AS": {url: "turns:prod-turn-fra.airtap.dev:3478", key: os.Getenv("TURN_FRA_KEY")},
-		"EU": {url: "turns:prod-turn-fra.airtap.dev:3478", key: os.Getenv("TURN_FRA_KEY")},
-		"AF": {url: "turns:prod-turn-fra.airtap.dev:3478", key: os.Getenv("TURN_FRA_KEY")},
+		"AS": {url: fraURL, key: os.Getenv(fraEnv)},
+		"EU": {url: fraURL, key: os.Getenv(fraEnv)},
+		"AF": {url: fraURL, key: os.Getenv(fraEnv)},
 
 		// SFO
-		"NA": {url: "turns:prod-turn-sfo.airtap.dev:3478", key: os.Getenv("TURN_SFO_KEY")},
-		"SA": {url: "turns:prod-turn-sfo.airtap.dev:3478", key: os.Getenv("TURN_SFO_KEY")},
-		"OC": {url: "turns:prod-turn-sfo.airtap.dev:3478", key: os.Getenv("TURN_SFO_KEY")},
+		"NA": {url: sfoURL, key: os.Getenv(sfoEnv)},
+		"SA": {url: sfoURL, key: os.Getenv(sfoEnv)},
+		"OC": {url: sfoURL, key: os.Getenv(sfoEnv)},
 	}
-)
 
-var defaultInfo = turnInfo{url: "turns:prod-turn-fra.airtap.dev:3478", key: os.Getenv("TURN_FRA_KEY")}
+	// Default server.
+	defaultInfo = turnInfo{url: fraURL, key: os.Getenv(fraEnv)}
+)
 
 type country struct {
 	ContinentCode    string `json:"Continent_Code,omitempty"`
@@ -57,12 +68,13 @@ func init() {
 	}
 }
 
-// Balance takes a country code (2 letters) and returns the URL of the TURN
-// server and the key with which the password for the server should be signed.
+// Balance takes a country code (2 letters as per ISO 3166-1 alpha-2) and
+// returns the URL of the TURN server and the key with which the password for
+// the server should be signed.
 func Balance(countryCode string) (string, string) {
 	// Treat Russia as North America because Ilya is in Russia and wants to test
 	// the US servers. :)
-	if countryCode == "RU" {
+	if strings.ToLower(countryCode) == "ru" {
 		if info, ok := continentsToURL["NA"]; ok {
 			return info.url, info.key
 		}
