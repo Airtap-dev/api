@@ -9,7 +9,6 @@ import (
 	"os"
 
 	"database/sql"
-	"server/lib/relay"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -95,8 +94,6 @@ func init() {
 	} else if err := m.Up(); err != migrate.ErrNoChange && err != nil {
 		log.Panic(err)
 	}
-
-	pool.connections = make(map[int]*relay.Conn)
 }
 
 func randString(n int) (string, error) {
@@ -131,13 +128,13 @@ func router(method string, f internalHandler) http.HandlerFunc {
 			log.Print("unknown error type")
 			w.WriteHeader(errInternal.httpStatus)
 			json.NewEncoder(w).Encode(errInternal)
-		} else {
+		} else if res != nil {
 			switch r := res.(type) {
 			case createResponse, discoverResponse, startResponse:
 				json.NewEncoder(w).Encode(r)
 				return
 			default:
-				log.Print("unknown response type")
+				log.Printf("unknown response type: %v", res)
 				w.WriteHeader(errInternal.httpStatus)
 				json.NewEncoder(w).Encode(errInternal)
 				return
