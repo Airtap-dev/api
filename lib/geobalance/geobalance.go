@@ -14,11 +14,11 @@ type turnInfo struct {
 
 const (
 	// FRA
-	fraURL = "turn:prod-turn-fra.airtap.dev:3478"
+	fraURL = "turn:prod-turn-fra.airtap.dev:443"
 	fraEnv = "TURN_FRA_KEY"
 
 	// SFO
-	sfoURL = "turn:prod-turn-sfo.airtap.dev:3478"
+	sfoURL = "turn:prod-turn-sfo.airtap.dev:443"
 	sfoEnv = "TURN_SFO_KEY"
 )
 
