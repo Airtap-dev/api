@@ -8,4 +8,6 @@ const createAccountQuery = "INSERT INTO accounts(license_id, code, token, first_
 
 const discoverAccountQuery = "SELECT id, first_name, last_name FROM accounts WHERE code = $1;"
 
-const authenticateQuery = "SELECT COUNT(*) FROM accounts WHERE id = $1 AND token = $2;"
+const authenticateQuery = "SELECT first_name, last_name, code FROM accounts WHERE id = $1 AND token = $2;"
+
+const issueQuery = "INSERT INTO license_keys(max_activations) VALUES ($1) RETURNING license, max_activations, revoked;"

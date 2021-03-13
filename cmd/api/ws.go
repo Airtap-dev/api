@@ -14,12 +14,15 @@ import (
 )
 
 var pool struct {
-	mu          sync.Mutex
+	rwMutex     sync.RWMutex
 	connections map[int]*relay.Conn
 }
 
-func ws(acc account, w http.ResponseWriter, r *http.Request) {
-	log.Printf("received new connection from %v", acc.id)
+func init() {
+	pool.connections = make(map[int]*relay.Conn)
+}
+
+func ws(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true
@@ -29,147 +32,180 @@ func ws(acc account, w http.ResponseWriter, r *http.Request) {
 	wsConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Print(err)
-		return
+		return nil, errInternal
 	}
 
-	pool.mu.Lock()
+	pool.rwMutex.Lock()
+	doneChan := make(chan bool)
 	relayConn := relay.NewConn(acc.id, wsConn)
 	pool.connections[acc.id] = relayConn
-	pool.mu.Unlock()
+	pool.rwMutex.Unlock()
 
+	// Deallocate connection resources upon return.
 	defer func() {
-		// TODO: close timeout goroutines
-		log.Printf("closing connection with %v", acc.id)
-		pool.mu.Lock()
+		pool.rwMutex.Lock()
+		defer pool.rwMutex.Unlock()
 		delete(pool.connections, acc.id)
-		pool.mu.Unlock()
 	}()
 
-	// Need to send a ping message down the connection so that Heroku doesn't
-	// reap it.
+	// Need to send ping messages every 30 seconds down the connection so that
+	// Heroku doesn't reap it.
 	ticker := time.NewTicker(30 * time.Second)
-	done := make(chan bool)
+	stopPing := make(chan bool)
+	// Deallocate the pinger goroutine upon connection close.
 	defer func() {
 		ticker.Stop()
-		done <- true
+		stopPing <- true
 	}()
 
+	// Start a goroutine for pings.
 	go func() {
 		for {
 			select {
 			case <-ticker.C:
 				relayConn.Ping()
-			case <-done:
+			case <-stopPing:
 				return
 			}
 		}
 	}()
 
 	for {
-		p, n := relayConn.Read()
-		if n == -1 {
+		select {
+		case <-doneChan:
 			break
-		} else if n == 0 {
-			continue
+		default:
+			p, n, err := relayConn.Read()
+			if err != nil {
+				log.Println(err)
+				break
+			} else if n <= 0 {
+				continue
+			}
+
+			// Assume the message is ACK. Try to parse as such.
+			ackMessage := relay.IncomingACKMessage{}
+			err = json.Unmarshal(p, &ackMessage)
+			if err == nil && strings.ToLower(ackMessage.Type) == relay.ACK {
+				relayConn.MarkAcked(ackMessage.Nonce)
+				continue
+			} else if _, ok := err.(*json.UnmarshalTypeError); err != nil && !ok {
+				// Since we don't know the message type and are trying to parse it
+				// sequentially, an error of type UnmarshalTypeError simply means we
+				// should carry on. Any other error, however, is problematic.
+				log.Print(err)
+				continue
+			}
+
+			// Assume the message is OFFER. Try to parse as such.
+			offerMessage := relay.IncomingOfferMessage{}
+			err = json.Unmarshal(p, &offerMessage)
+			if err == nil && strings.ToLower(ackMessage.Type) == relay.OFFER {
+				handleOffer(relayConn, offerMessage.Payload.Offer, acc.id, offerMessage.Payload.ToID)
+				relayConn.SendAck(offerMessage.Nonce)
+				continue
+			} else if _, ok := err.(*json.UnmarshalTypeError); err != nil && !ok {
+				// Since we don't know the message type and are trying to parse it
+				// sequentially, an error of type UnmarshalTypeError simply means we
+				// should carry on. Any other error, however, is problematic.
+				log.Print(err)
+				continue
+			}
+
+			// Assume the message is ANSWER. Try to parse as such.
+			answerMessage := relay.IncomingAnswerMessage{}
+			err = json.Unmarshal(p, &answerMessage)
+			if err == nil && strings.ToLower(answerMessage.Type) == relay.ANSWER {
+				handleAnswer(relayConn, answerMessage.Payload.Answer, acc.id, answerMessage.Payload.ToID)
+				relayConn.SendAck(answerMessage.Nonce)
+				continue
+			} else if _, ok := err.(*json.UnmarshalTypeError); err != nil && !ok {
+				// Since we don't know the message type and are trying to parse it
+				// sequentially, an error of type UnmarshalTypeError simply means we
+				// should carry on. Any other error, however, is problematic.
+				log.Print(err)
+				continue
+			}
+
+			// Assume the message is INFO. Try to parse as such.
+			infoMessage := relay.IncomingInfoMessage{}
+			err = json.Unmarshal(p, &infoMessage)
+			if err == nil && strings.ToLower(infoMessage.Type) == relay.INFO {
+				handleInfo(relayConn, infoMessage.Payload.Info, acc.id, answerMessage.Payload.ToID)
+				relayConn.SendAck(infoMessage.Nonce)
+				continue
+			} else if _, ok := err.(*json.UnmarshalTypeError); err != nil && !ok {
+				// Since we don't know the message type and are trying to parse
+				// it sequentially, an error of type UnmarshalTypeError simply
+				// means we should carry on. Any other error, however, is
+				// problematic.
+				log.Print(err)
+				continue
+			}
+
+			// Assume the message is CANDIDATE. Try to parse as such.
+			candidateMessage := relay.IncomingCandidateMessage{}
+			err = json.Unmarshal(p, &candidateMessage)
+			if err == nil && strings.ToLower(candidateMessage.Type) == relay.CANDIDATE {
+				handleCandidate(relayConn, candidateMessage.Payload.Candidate, acc.id, candidateMessage.Payload.ToID)
+				relayConn.SendAck(candidateMessage.Nonce)
+				continue
+			} else {
+				// At this point the message has to parse as CANDIDATE. The entire
+				// else clause is indicative of a problem.
+				log.Printf("Unknown message type: %v, %v", err, string(p))
+				continue
+			}
 		}
-
-		log.Printf("got a message from %v", acc.id)
-
-		ackMessage := relay.IncomingACKMessage{}
-		err := json.Unmarshal(p, &ackMessage)
-		if err == nil && strings.ToLower(ackMessage.Type) == relay.ACK {
-			log.Printf("ack")
-			relayConn.MarkAcked(ackMessage.Nonce)
-			continue
-		} else if _, ok := err.(*json.UnmarshalTypeError); err != nil && !ok {
-			log.Print(err)
-			continue
-		}
-
-		offerMessage := relay.IncomingOfferMessage{}
-		err = json.Unmarshal(p, &offerMessage)
-		if err == nil && strings.ToLower(ackMessage.Type) == relay.OFFER {
-			log.Printf("offer")
-			handleOffer(relayConn, offerMessage.Payload.Offer, acc.id, offerMessage.Payload.ToID)
-			relayConn.SendAck(offerMessage.Nonce)
-			continue
-		} else if _, ok := err.(*json.UnmarshalTypeError); err != nil && !ok {
-			log.Print(err)
-			continue
-		}
-
-		answerMessage := relay.IncomingAnswerMessage{}
-		err = json.Unmarshal(p, &answerMessage)
-		if err == nil && strings.ToLower(answerMessage.Type) == relay.ANSWER {
-			log.Printf("answer")
-			handleAnswer(relayConn, answerMessage.Payload.Answer, acc.id, answerMessage.Payload.ToID)
-			relayConn.SendAck(answerMessage.Nonce)
-			continue
-		} else if _, ok := err.(*json.UnmarshalTypeError); err != nil && !ok {
-			log.Print(err)
-			continue
-		}
-
-		candidateMessage := relay.IncomingCandidateMessage{}
-		err = json.Unmarshal(p, &candidateMessage)
-		if err == nil && strings.ToLower(candidateMessage.Type) == relay.CANDIDATE {
-			log.Printf("candidate")
-			handleCandidate(relayConn, candidateMessage.Payload.Candidate, acc.id, candidateMessage.Payload.ToID)
-			relayConn.SendAck(candidateMessage.Nonce)
-			continue
-		} else if _, ok := err.(*json.UnmarshalTypeError); err != nil && !ok {
-			log.Print(err)
-			continue
-		}
-
-		log.Printf("Unknown message type: %v", string(p))
 	}
 }
 
 func handleOffer(conn *relay.Conn, offer interface{}, selfID, peerID int) {
-	log.Printf("storing offer")
 	conn.StoreOffer(peerID, offer)
-	log.Printf("stored offer")
 
-	pool.mu.Lock()
+	pool.rwMutex.RLock()
 	if peer, ok := pool.connections[peerID]; ok {
-		log.Printf("peer exists")
-		pool.mu.Unlock()
+		pool.rwMutex.RUnlock()
 		if peer.IsExpectingOfferFrom(selfID) {
-			log.Printf("peer expecting")
 			conn.RelayOffer(peer, offer)
 		}
 	} else {
-		log.Printf("peer doesn't exist yet")
-		pool.mu.Unlock()
+		pool.rwMutex.RUnlock()
 	}
 }
 
 func handleAnswer(conn *relay.Conn, answer interface{}, selfID, peerID int) {
-	pool.mu.Lock()
+	pool.rwMutex.RLock()
 	if peer, ok := pool.connections[peerID]; ok {
-		log.Println("peer exists")
-		pool.mu.Unlock()
+		pool.rwMutex.RUnlock()
 		if peer.IsExpectingAnswerFrom(selfID) {
-			log.Println("peer expects answer")
 			conn.RelayAnswer(peer, answer)
 		} else {
-			log.Println("peer not expecting answer")
 		}
 	} else {
-		log.Println("peer doesn't exist")
-		pool.mu.Unlock()
+		pool.rwMutex.RUnlock()
+	}
+}
+
+func handleInfo(conn *relay.Conn, info interface{}, selfID, peerID int) {
+	pool.rwMutex.RLock()
+	if peer, ok := pool.connections[peerID]; ok {
+		pool.rwMutex.RUnlock()
+		if peer.IsEstablishedWith(selfID) {
+			conn.RelayInfo(peer, info)
+		} else {
+		}
+	} else {
+		pool.rwMutex.RUnlock()
 	}
 }
 
 func handleCandidate(conn *relay.Conn, candidate interface{}, selfID, peerID int) {
-	pool.mu.Lock()
+	pool.rwMutex.RLock()
 	if peer, ok := pool.connections[peerID]; ok {
-		log.Println("peer exists")
-		pool.mu.Unlock()
+		pool.rwMutex.RUnlock()
 		conn.RelayCandidate(peer, candidate)
 	} else {
-		log.Println("peer doesn't exist")
-		pool.mu.Unlock()
+		pool.rwMutex.RUnlock()
 	}
 }

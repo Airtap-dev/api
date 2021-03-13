@@ -1,118 +1,86 @@
 package main
 
 import (
-	"crypto/hmac"
-	"crypto/sha1"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
+	"database/sql"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
+
+	"server/lib/geobalance"
+
+	pTurn "github.com/pion/turn/v2"
 )
 
+func auth(f internalHandler) internalHandler {
+	return func(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
+		id, token, ok := r.BasicAuth()
+		if !ok {
+			return nil, errInvalidCredentials
+		}
+
+		var firstName, lastName, code string
+		row := dbGlobal.QueryRow(authenticateQuery, id, token)
+		if err := row.Scan(&firstName, &lastName, &code); err == sql.ErrNoRows {
+			return nil, errInvalidCredentials
+		} else if err != nil {
+			log.Print(err)
+			return nil, errInternal
+		}
+
+		i, _ := strconv.Atoi(id)
+		return f(account{id: i, firstName: firstName, lastName: lastName, code: code}, w, r)
+	}
+}
+
 type turnCredentials struct {
-	ID       int    `json:"serverId"`
 	URL      string `json:"url"`
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-type turnResponse struct {
-	Servers []turnCredentials `json:"servers"`
+type startResponse struct {
+	ID              int               `json:"accountId"`
+	FirstName       string            `json:"firstName"`
+	LastName        string            `json:"lastName"`
+	ShareableLink   string            `json:"shareableLink"`
+	TurnCredentials []turnCredentials `json:"turnCredentials"`
 }
 
-var turnKeys = []struct {
-	url string
-	env string
-	id  int
-}{
-	{
-		url: "turns:turn.airtap.dev:5349",
-		env: "TURN_GERMANY_KEY",
-		id:  1,
-	},
-}
+func start(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
+	var countryCode = r.Header.Get("CF-IPCountry")
+	if countryCode == "" {
+		countryCode = "unknown"
+	}
 
-// The username is a colon-delimited random string and an expiration timestamp.
-// For more information, see the TURN REST API memo:
-// https://tools.ietf.org/html/draft-uberti-behave-turn-rest-00.
-func createUsername() (string, error) {
-	tempID, err := randString(5)
+	creds, err := turn(countryCode)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	username := fmt.Sprintf("%v:%v", strconv.FormatInt(time.Now().Add(365*24*time.Hour).Unix(), 10), tempID)
-	return username, nil
+	return startResponse{
+		ID:              acc.id,
+		FirstName:       acc.firstName,
+		LastName:        acc.lastName,
+		ShareableLink:   createShareableLink(acc.code),
+		TurnCredentials: creds,
+	}, nil
 }
 
-// The password is base64(hmac(secret key, username)) where secret key is a key
-// stored between the backend and the TURN server. HMAC uses SHA-1 as required
-// by COTURN. For more information, see
-// https://tools.ietf.org/html/draft-uberti-behave-turn-rest-00 and
-// https://github.com/coturn/coturn/blob/060bf187879fd1a6386012f4c5a7494824ebe5c8/README.turnserver.
-func createPassword(username, key string) (string, error) {
-	hasher := hmac.New(sha1.New, []byte(os.Getenv(key)))
-	if _, err := hasher.Write([]byte(username)); err != nil {
-		return "", err
-	}
-
-	return base64.StdEncoding.EncodeToString(hasher.Sum(nil)), nil
-}
-
-func turn(acc account, w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.NotFound(w, r)
-		return
-	}
-
-	servers := make([]turnCredentials, len(turnKeys))
-	for i, key := range turnKeys {
-		var username, password string
-		var err error
-
-		if username, err = createUsername(); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(apiError{
-				Code:    codeInternalError,
-				Message: messageInternalError,
-			})
-
-			log.Print(err)
-			return
-		}
-
-		if password, err = createPassword(username, os.Getenv(key.env)); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			json.NewEncoder(w).Encode(apiError{
-				Code:    codeInternalError,
-				Message: messageInternalError,
-			})
-
-			log.Print(err)
-			return
-		}
-
-		servers[i] = turnCredentials{
-			URL:      key.url,
-			Username: username,
-			Password: password,
-			ID:       key.id,
-		}
-	}
-
-	if err := json.NewEncoder(w).Encode(turnResponse{
-		Servers: servers,
-	}); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(apiError{
-			Code:    codeInternalError,
-			Message: messageInternalError,
-		})
-
+func turn(countryCode string) ([]turnCredentials, error) {
+	url, key := geobalance.Balance(countryCode)
+	// Create credentials valid for a year.
+	username, password, err := pTurn.GenerateLongTermCredentials(key, 365*24*time.Hour)
+	if err != nil {
 		log.Print(err)
+		return nil, errInternal
 	}
+
+	creds := turnCredentials{
+		URL:      url,
+		Username: username,
+		Password: password,
+	}
+
+	return []turnCredentials{creds}, nil
 }

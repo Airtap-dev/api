@@ -5,6 +5,9 @@ It compiles to multiple binaries and runs on Heroku.
 
 The `issuer` executable issues new license codes on demand (defaults to 10 accounts per key). The `api` executable serves the HTTP API and the SDP relay over WebSockets.
 
+## Testing
+`TURN_SFO_KEY=secretkey DATABASE_URL=postgresql://localhost?sslmode=disable make test`
+
 ## Running
 Make sure you have a local Postgres database running. To make sure the migrations work, bring them up, then down, then up again.
 ```
@@ -21,7 +24,7 @@ heroku repo:reset -a airtap-api-staging
 heroku git:remote -a staging
 ```
 
-Then you can build: `make build`. And now you are ready to run! (Go is a compiled language, make sure to rebuild before each run): `heroku local` (runs the issuer) or `heroku local web` (runs the web server). When running locally with `heroku local`, you can set environment variables in the `.env` file. It's already in `.gitignore`.
+Then you can build: `make build`. And now you are ready to run! (Go is a compiled language, make sure to rebuild before each run): `heroku local issuer` (runs the issuer) or `heroku local web` (runs the web server). When running locally with `heroku local`, you can set environment variables in the `.env` file.
 
 To issue a new license on staging, run:
 ```
