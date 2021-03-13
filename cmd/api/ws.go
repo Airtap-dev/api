@@ -75,16 +75,17 @@ func ws(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
 		case <-doneChan:
 			break
 		default:
-			p, n := relayConn.Read()
-			if n == -1 {
+			p, n, err := relayConn.Read()
+			if err != nil {
+				log.Println(err)
 				break
-			} else if n == 0 {
+			} else if n <= 0 {
 				continue
 			}
 
 			// Assume the message is ACK. Try to parse as such.
 			ackMessage := relay.IncomingACKMessage{}
-			err := json.Unmarshal(p, &ackMessage)
+			err = json.Unmarshal(p, &ackMessage)
 			if err == nil && strings.ToLower(ackMessage.Type) == relay.ACK {
 				relayConn.MarkAcked(ackMessage.Nonce)
 				continue

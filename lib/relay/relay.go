@@ -168,19 +168,18 @@ func (c *Conn) Close() {
 }
 
 // Read reads from the connection.
-func (c *Conn) Read() ([]byte, int) {
+func (c *Conn) Read() ([]byte, int, error) {
 	c.rLock.Lock()
 	defer c.rLock.Unlock()
 
 	messageType, p, err := c.conn.ReadMessage()
 	if err != nil {
-		log.Print(err)
-		return []byte{}, -1
+		return []byte{}, -1, err
 	} else if messageType != websocket.TextMessage {
-		return []byte{}, 0
+		return []byte{}, 0, nil
 	}
 
-	return p, len(p)
+	return p, len(p), nil
 }
 
 // NewConn creates a connection.
