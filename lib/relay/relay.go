@@ -18,7 +18,34 @@ const (
 	ANSWER = "answer"
 	// CANDIDATE is candidate message type.
 	CANDIDATE = "candidate"
+	// INFO is informational message type.
+	INFO = "info"
 )
+
+// IncomingACKMessage represents a received informational message.
+type IncomingInfoMessage struct {
+	Type    string              `json:"type"`
+	Nonce   int                 `json:"nonce"`
+	Payload IncomingInfoPayload `json:"payload"`
+}
+
+// IncomingInfoPayload represents a received informational payload.
+type IncomingInfoPayload struct {
+	ToID int         `json:"toAccountId"`
+	Info interface{} `json:"info"`
+}
+
+// OutgoingInfoPayload represents an outgoing candidate payload.
+type OutgoingInfoPayload struct {
+	FromID int         `json:"fromAccountId"`
+	Info   interface{} `json:"info"`
+}
+
+type outgoingInfoMessage struct {
+	Type    string              `json:"type"`
+	Nonce   int                 `json:"nonce"`
+	Payload OutgoingInfoPayload `json:"payload"`
+}
 
 // IncomingACKMessage represents a received acknowledgement message.
 type IncomingACKMessage struct {
@@ -120,6 +147,7 @@ type Conn struct {
 	unackedNonces        map[int]*time.Timer
 	offersFor            map[int]bool
 	expectingAnswersFrom map[int]bool
+	establishedWith      map[int]bool
 }
 
 // Close closes the connection.
@@ -164,6 +192,7 @@ func NewConn(id int, wsConn *websocket.Conn) *Conn {
 		unackedNonces:        make(map[int]*time.Timer),
 		offersFor:            make(map[int]bool),
 		expectingAnswersFrom: make(map[int]bool),
+		establishedWith:      make(map[int]bool),
 	}
 }
 
@@ -182,6 +211,14 @@ func (c *Conn) StoreOffer(peerID int, offer interface{}) {
 	c.rwMutex.Lock()
 	defer c.rwMutex.Unlock()
 	c.offersFor[peerID] = true
+}
+
+// IsEstablishedWith returns whether the connection has exchanged information
+// with a particular peer.
+func (c *Conn) IsEstablishedWith(peerID int) bool {
+	c.rwMutex.RLock()
+	defer c.rwMutex.RUnlock()
+	return c.establishedWith[peerID]
 }
 
 // IsExpectingOfferFrom returns whether the connection is expecting an offer
@@ -225,9 +262,47 @@ func (c *Conn) RelayAnswer(peer *Conn, answer interface{}) {
 	}
 	peer.wLock.Unlock()
 
+	c.rwMutex.Lock()
+	c.establishedWith[peer.id] = true
+	c.rwMutex.Unlock()
+
 	peer.rwMutex.Lock()
 	defer peer.rwMutex.Unlock()
+	peer.establishedWith[c.id] = true
 	delete(peer.expectingAnswersFrom, c.id)
+	peer.lastOutgoingNonce++
+	peer.unackedNonces[peer.lastOutgoingNonce] = time.AfterFunc(1*time.Minute, func() {
+		log.Printf("Never received ACK to message %v from account %v", msg, peer.id)
+	})
+}
+
+// RelayInfo relays an airbitrary message to a peer connection.
+func (c *Conn) RelayInfo(peer *Conn, info interface{}) {
+	msg := outgoingInfoMessage{
+		Type:  INFO,
+		Nonce: peer.lastOutgoingNonce + 1,
+		Payload: OutgoingInfoPayload{
+			FromID: c.id,
+			Info:   info,
+		},
+	}
+
+	json, err := json.Marshal(msg)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	peer.wLock.Lock()
+	if err := peer.conn.WriteMessage(websocket.TextMessage, json); err != nil {
+		log.Print(err)
+		peer.wLock.Unlock()
+		return
+	}
+	peer.wLock.Unlock()
+
+	peer.rwMutex.Lock()
+	defer peer.rwMutex.Unlock()
 	peer.lastOutgoingNonce++
 	peer.unackedNonces[peer.lastOutgoingNonce] = time.AfterFunc(1*time.Minute, func() {
 		log.Printf("Never received ACK to message %v from account %v", msg, peer.id)
