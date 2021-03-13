@@ -126,6 +126,22 @@ func ws(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
 				continue
 			}
 
+			// Assume the message is INFO. Try to parse as such.
+			infoMessage := relay.IncomingInfoMessage{}
+			err = json.Unmarshal(p, &infoMessage)
+			if err == nil && strings.ToLower(infoMessage.Type) == relay.INFO {
+				handleInfo(relayConn, infoMessage.Payload.Info, acc.id, answerMessage.Payload.ToID)
+				relayConn.SendAck(infoMessage.Nonce)
+				continue
+			} else if _, ok := err.(*json.UnmarshalTypeError); err != nil && !ok {
+				// Since we don't know the message type and are trying to parse
+				// it sequentially, an error of type UnmarshalTypeError simply
+				// means we should carry on. Any other error, however, is
+				// problematic.
+				log.Print(err)
+				continue
+			}
+
 			// Assume the message is CANDIDATE. Try to parse as such.
 			candidateMessage := relay.IncomingCandidateMessage{}
 			err = json.Unmarshal(p, &candidateMessage)
@@ -136,7 +152,7 @@ func ws(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
 			} else {
 				// At this point the message has to parse as CANDIDATE. The entire
 				// else clause is indicative of a problem.
-				log.Printf("Unkwnown message type: %v, %v", err, string(p))
+				log.Printf("Unknown message type: %v, %v", err, string(p))
 				continue
 			}
 		}
@@ -163,6 +179,19 @@ func handleAnswer(conn *relay.Conn, answer interface{}, selfID, peerID int) {
 		pool.rwMutex.RUnlock()
 		if peer.IsExpectingAnswerFrom(selfID) {
 			conn.RelayAnswer(peer, answer)
+		} else {
+		}
+	} else {
+		pool.rwMutex.RUnlock()
+	}
+}
+
+func handleInfo(conn *relay.Conn, info interface{}, selfID, peerID int) {
+	pool.rwMutex.RLock()
+	if peer, ok := pool.connections[peerID]; ok {
+		pool.rwMutex.RUnlock()
+		if peer.IsEstablishedWith(selfID) {
+			conn.RelayInfo(peer, info)
 		} else {
 		}
 	} else {
