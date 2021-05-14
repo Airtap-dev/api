@@ -54,7 +54,7 @@ func makeAuthenticatedRequest(id int, token string) *http.Request {
 
 	return &http.Request{
 		Header: map[string][]string{
-			"Authorization": []string{header},
+			"Authorization": {header},
 		},
 	}
 }
