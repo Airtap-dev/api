@@ -73,13 +73,13 @@ func ws(acc account, w http.ResponseWriter, r *http.Request) (response, error) {
 	for {
 		select {
 		case <-doneChan:
-			break
+			// TODO: implement external cancel?
+			return nil, nil
 		default:
 			p, n, err := relayConn.Read()
-			if err != nil {
-				log.Println(err)
-				break
-			} else if n <= 0 {
+			if err != nil || n < 0 {
+				return nil, err
+			} else if n == 0 {
 				continue
 			}
 
@@ -180,7 +180,6 @@ func handleAnswer(conn *relay.Conn, answer interface{}, selfID, peerID int) {
 		pool.rwMutex.RUnlock()
 		if peer.IsExpectingAnswerFrom(selfID) {
 			conn.RelayAnswer(peer, answer)
-		} else {
 		}
 	} else {
 		pool.rwMutex.RUnlock()
@@ -193,7 +192,6 @@ func handleInfo(conn *relay.Conn, info interface{}, selfID, peerID int) {
 		pool.rwMutex.RUnlock()
 		if peer.IsEstablishedWith(selfID) {
 			conn.RelayInfo(peer, info)
-		} else {
 		}
 	} else {
 		pool.rwMutex.RUnlock()
