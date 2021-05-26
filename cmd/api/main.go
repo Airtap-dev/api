@@ -125,9 +125,7 @@ func router(method string, f internalHandler) http.HandlerFunc {
 				return
 			}
 
-			log.Print("unknown error type")
-			w.WriteHeader(errInternal.httpStatus)
-			json.NewEncoder(w).Encode(errInternal)
+			log.Printf("non-API error: %s", err)
 		} else if res != nil {
 			switch r := res.(type) {
 			case createResponse, discoverResponse, startResponse:
