@@ -20,6 +20,8 @@ const (
 	CANDIDATE = "candidate"
 	// INFO is informational message type.
 	INFO = "info"
+	// ONLINEPEERS lists peers that are online.
+	ONLINEPEERS = "onlinePeers"
 )
 
 // IncomingACKMessage represents a received informational message.
@@ -56,6 +58,17 @@ type IncomingACKMessage struct {
 type outgoingACKMessage struct {
 	Type  string `json:"type"`
 	Nonce int    `json:"nonce"`
+}
+
+type outgoingOnlinePeersMessage struct {
+	Type    string                     `json:"type"`
+	Nonce   int                        `json:"nonce"`
+	Payload OutgoingOnlinePeersPayload `json:"payload"`
+}
+
+// OutgoingOfferPayload represents an payload with a list of online peers.
+type OutgoingOnlinePeersPayload struct {
+	OnlinePeers []int `json:"onlinePeers"`
 }
 
 // IncomingOfferPayload represents a received offer payload.
@@ -140,14 +153,26 @@ type Conn struct {
 	// Lock for the underlying websocket connection writer.
 	wLock sync.Mutex
 	// Lock for the Conn struct itself.
-	rwMutex              sync.RWMutex
-	conn                 *websocket.Conn
-	id                   int
-	lastOutgoingNonce    int
-	unackedNonces        map[int]*time.Timer
-	offersFor            map[int]bool
+	rwMutex           sync.RWMutex
+	conn              *websocket.Conn
+	id                int
+	lastOutgoingNonce int
+	unackedNonces     map[int]*time.Timer
+	// offersFor lists for whom the connection has offers.
+	offersFor map[int]bool
+	// expectingAnswersFrom lists from whom the connection is expecting answers,
+	// after delivering its offers.
 	expectingAnswersFrom map[int]bool
-	establishedWith      map[int]bool
+	// establishedWith lists with whom the connection has been established after
+	// the offer-answer exchange.
+	establishedWith   map[int]bool
+	mostRecentMessage time.Time
+}
+
+func (c *Conn) IsOnline() bool {
+	c.rwMutex.RLock()
+	defer c.rwMutex.RUnlock()
+	return time.Since(c.mostRecentMessage) < 20*time.Second
 }
 
 // Close closes the connection.
@@ -164,27 +189,53 @@ func (c *Conn) Close() {
 	c.wLock.Lock()
 	defer c.wLock.Unlock()
 
+	c.conn.WriteControl(websocket.CloseMessage, nil, time.Now().Add(1*time.Second))
 	c.conn.Close()
 }
 
 // Read reads from the connection.
-func (c *Conn) Read() ([]byte, int, error) {
+func (c *Conn) Read() ([]byte, error) {
 	c.rLock.Lock()
 	defer c.rLock.Unlock()
 
 	messageType, p, err := c.conn.ReadMessage()
 	if err != nil {
-		return []byte{}, -1, err
+		return []byte{}, err
 	} else if messageType != websocket.TextMessage {
-		return []byte{}, 0, nil
+		return []byte{}, nil
 	}
 
-	return p, len(p), nil
+	// If we read a message of non-zero length, update the most recent
+	// timestamp.
+	if len(p) != 0 {
+		c.mostRecentMessage = time.Now()
+	}
+
+	return p, nil
+}
+
+func (c *Conn) GetPeers() []int {
+	uniquePeers := make(map[int]bool)
+	for id := range c.offersFor {
+		uniquePeers[id] = true
+	}
+	for id := range c.expectingAnswersFrom {
+		uniquePeers[id] = true
+	}
+	for id := range c.establishedWith {
+		uniquePeers[id] = true
+	}
+
+	peers := make([]int, 0, len(uniquePeers))
+	for id := range uniquePeers {
+		peers = append(peers, id)
+	}
+	return peers
 }
 
 // NewConn creates a connection.
 func NewConn(id int, wsConn *websocket.Conn) *Conn {
-	return &Conn{
+	c := Conn{
 		conn:                 wsConn,
 		id:                   id,
 		lastOutgoingNonce:    0,
@@ -193,6 +244,15 @@ func NewConn(id int, wsConn *websocket.Conn) *Conn {
 		expectingAnswersFrom: make(map[int]bool),
 		establishedWith:      make(map[int]bool),
 	}
+
+	wsConn.SetPongHandler(func(appData string) error {
+		c.rwMutex.Lock()
+		defer c.rwMutex.Unlock()
+		c.mostRecentMessage = time.Now()
+		return nil
+	})
+
+	return &c
 }
 
 // MarkAcked marks a message as ACKed.
@@ -388,7 +448,7 @@ func (c *Conn) Ping() {
 	c.wLock.Unlock()
 }
 
-// SendAck send an acknowledgement message.
+// SendAck sends an acknowledgement message.
 func (c *Conn) SendAck(nonce int) {
 	json, err := json.Marshal(outgoingACKMessage{
 		Type:  ACK,
@@ -406,4 +466,41 @@ func (c *Conn) SendAck(nonce int) {
 		log.Print(err)
 		return
 	}
+}
+
+// SendOnlinePeers send a list of peers that are online.
+func (c *Conn) SendOnlinePeers(onlinePeers []int) {
+	// Perform this check so that Go encodes the empty slice as [], not null.
+	if onlinePeers == nil {
+		onlinePeers = make([]int, 0)
+	}
+
+	msg := outgoingOnlinePeersMessage{
+		Type:  ONLINEPEERS,
+		Nonce: c.lastOutgoingNonce + 1,
+		Payload: OutgoingOnlinePeersPayload{
+			OnlinePeers: onlinePeers,
+		},
+	}
+
+	json, err := json.Marshal(msg)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	c.wLock.Lock()
+	if err := c.conn.WriteMessage(websocket.TextMessage, json); err != nil {
+		log.Print(err)
+		c.wLock.Unlock()
+		return
+	}
+	c.wLock.Unlock()
+
+	c.rwMutex.Lock()
+	c.lastOutgoingNonce++
+	c.unackedNonces[c.lastOutgoingNonce] = time.AfterFunc(1*time.Minute, func() {
+		log.Printf("Never received ACK to message %v from account %v", msg, c.id)
+	})
+	c.rwMutex.Unlock()
 }
